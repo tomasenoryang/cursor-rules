@@ -1,0 +1,229 @@
+---
+description: 项目通用规范和基本信息
+globs:{"*"}
+alwaysApply: true
+---
+# 项目通用规范
+## 技术栈
+- c++11/c++14/c++17
+## 代码风格
+- 与当前项目保持一致
+- 保持代码简洁、可读
+- 添加适当的注释解释复杂逻辑
+- **避免冗余注释**：函数参数如果含义清晰，不需要逐行注释每个参数
+- **避免重复代码**：如果外层调用处已经处理了某些逻辑（如状态设置），内层函数不应重复处理
+
+## 项目结构
+- 保持项目结构清晰，遵循模块化原则
+- 相关功能放在一个目录下
+- 使用适当的目录命名，反应其包含内容
+
+## 通用开发原则
+- 编写可测试的代码
+- 避免重复代码（DRY原则）
+- 考虑代码的可维护性和可扩展性
+## 日志
+### 日志格式
+```cpp
+LOG_ERROR << 错误详细信息 << LOG_ERRORCODE(ret);
+```
+### 日志宏
+**只需要使用以下三种，没有其它宏**
+LOG_TRACE LOG_ERROR LOG_DEBUG
+### 日志打印规则
+- 如果打印参数类型为 `string`，则需要使用 `Utf8CharToLogStr(string_param.c_str())` 进行转换
+- 如果打印参数类型为 `SSTRING_T`，则可以直接使用
+- 示例：
+  ```cpp
+  // 正确
+  LOG_DEBUG << SSTR("模块 [") << Utf8CharToLogStr(moduleIndex.module_info.name.c_str()) << SSTR("] 未安装，跳过检查");
+  
+  // 错误
+  LOG_DEBUG << SSTR("模块 [") << moduleIndex.module_info.name << SSTR("] 未安装，跳过检查");
+  ```
+
+## JSON 文件处理
+
+### RapidJSON 库使用规范
+- **头文件包含**：使用 `#include <3rdparty/rapidJson/srcInclude/rapidjson.h>`
+- **库位置**：`3rdparty\rapidJson\srcInclude\`
+- **版本要求**：支持 C++11 及以上版本
+
+
+### 错误处理规范
+
+#### 1. 文件操作错误
+```cpp
+// 检查文件是否存在
+if (!std::filesystem::exists(filePath)) {
+    LOG_ERROR << SSTR("JSON 文件不存在: ") << Utf8CharToLogStr(filePath.c_str()) << LOG_ERRORCODE(-1);
+    return false;
+}
+```
+
+#### 2. JSON 解析错误
+```cpp
+// 检查解析结果
+if (document.HasParseError()) {
+    LOG_ERROR << SSTR("JSON 解析失败: ") << rapidjson::GetParseError_En(document.GetParseError())
+              << SSTR(" 错误位置: ") << document.GetErrorOffset() << LOG_ERRORCODE(-1);
+    return false;
+}
+```
+
+#### 3. 类型检查
+```cpp
+// 检查 JSON 值类型
+if (!value.IsString()) {
+    LOG_ERROR << SSTR("期望字符串类型，实际类型: ") << value.GetType() << LOG_ERRORCODE(-1);
+    return false;
+}
+```
+
+### 性能优化建议
+
+#### 1. 使用 StringRef 避免字符串拷贝
+```cpp
+// 推荐：使用 StringRef
+document.AddMember("key", rapidjson::StringRef("value"), allocator);
+
+// 避免：直接使用字符串
+document.AddMember("key", "value", allocator);
+```
+
+#### 2. 预分配内存
+```cpp
+// 对于大型 JSON 文档，预分配内存
+rapidjson::Document document;
+document.SetObject();
+rapidjson::Document::AllocatorType& allocator = document.GetAllocator();
+
+// 预分配数组空间
+rapidjson::Value array(rapidjson::kArrayType);
+array.Reserve(1000, allocator); // 预分配 1000 个元素的空间
+```
+
+#### 3. 使用移动语义
+```cpp
+// 使用 std::move 避免不必要的拷贝
+rapidjson::Value value(std::move(sourceValue));
+document.AddMember("key", value, allocator);
+```
+
+### 常用工具函数
+
+#### 1. JSON 值转换工具
+```cpp
+// 将 JSON 值转换为字符串
+std::string JsonValueToString(const rapidjson::Value& value) {
+    rapidjson::StringBuffer buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    value.Accept(writer);
+    return buffer.GetString();
+}
+
+// 将字符串转换为 JSON 值
+rapidjson::Value StringToJsonValue(const std::string& str, rapidjson::Document::AllocatorType& allocator) {
+    return rapidjson::Value(str.c_str(), allocator);
+}
+```
+
+#### 2. 深度复制 JSON 值
+```cpp
+// 深度复制 JSON 值
+rapidjson::Value DeepCopyJsonValue(const rapidjson::Value& source, rapidjson::Document::AllocatorType& allocator) {
+    rapidjson::Value copy;
+    copy.CopyFrom(source, allocator);
+    return copy;
+}
+```
+
+### 注意事项
+
+1. **内存管理**：RapidJSON 使用分配器管理内存，确保在同一个分配器作用域内使用
+2. **线程安全**：RapidJSON 本身不是线程安全的，多线程环境下需要适当的同步
+3. **异常安全**：RapidJSON 不会抛出异常，所有错误都通过返回值或错误标志表示
+4. **编码支持**：默认支持 UTF-8 编码，确保文件编码正确
+5. **文件路径**：使用 `std::filesystem::path` 处理跨平台路径问题
+
+## 代码习惯和最佳实践
+
+### 宏定义使用
+- **公共宏定义位置**：所有项目级别的宏定义应放在 `pch.h` 中，而不是分散在各个头文件中
+- **使用原则**：对于频繁使用的函数调用，应创建宏来简化代码，提高可读性
+
+### 公共头文件管理
+- **标准库头文件**：常用的标准库头文件（如 `<filesystem>`, `<fstream>`, `<algorithm>`, `<cctype>`, `<vector>`, `<string>` 等）应放在 `pch.h` 中
+- **避免重复包含**：不要在实现文件中重复包含已在 `pch.h` 中定义的头文件
+- **原则**：如果多个文件都需要某个头文件，应将其放在 `pch.h` 中
+
+### 命名空间简化
+- **使用 using 声明**：对于频繁使用的长命名空间，使用 `using` 声明简化
+
+### 常量定义
+- **使用 constexpr**：对于编译期常量，使用 `constexpr` 定义
+  ```cpp
+  // 推荐
+  constexpr size_t MAX_LOCAL_FILE_COUNT = 300;
+  
+  // 不推荐
+  #define MAX_LOCAL_FILE_COUNT 300
+  ```
+
+### 避免重复逻辑
+- **状态设置**：如果外层调用处已经统一处理状态设置，内层函数不应重复设置
+
+## 公共库依赖
+
+### 核心库
+- **Helios 框架**：项目核心框架，提供接口管理和基础功能
+  - 位置：`<Helios/helios.h>`
+  - 主要命名空间：`Helios`, `log`, `os`, `crypto`, `net`, `rpc`, `strings`, `content`, `him`
+
+### JSON 处理
+- **RapidJSON**：JSON 解析和序列化
+  - 头文件：`<rapidjson.h>`, `<document.h>`, `<writer.h>`, `<stringbuffer.h>`
+  - 位置：`3rdparty/rapidJson/srcInclude/`
+  - 用途：配置文件解析、数据序列化
+
+### 文件系统
+- **std::filesystem**：文件系统操作（C++17）
+  - 头文件：`<filesystem>`（已在 `pch.h` 中）
+  - 用途：路径处理、文件存在性检查、文件大小获取
+
+### 加密和哈希
+- **crypto::IDigestEx**：哈希计算接口
+  - 接口名称：`crypto.IDigestEx`
+  - 主要方法：
+    - `digestStringFromFileEx`：使用 `SSTRING_T` 路径（宽字符）
+    - `digestStringAFromFileEx`：使用 `const char*` 路径（ANSI，推荐）
+  - 用途：MD5、SHA256 哈希计算
+  - 数据结构：
+    - `HASH_DATA_STR_POINT_SET_W` / `HASH_DATA_STR_POINT_SET_A`：哈希数据指针集合
+    - `HASH_DATA_STRING_W` / `HASH_DATA_STRING_A`：哈希值字符串结构
+
+### 签名验证
+- **utils::IsMyCompanyFileSigned**：公司签名验证
+  - 位置：`src/include/helper/utils.h`
+  - 用途：检查文件是否包含公司签名
+
+- **him::HIM_DiskFileGenPtr**：文件签名信息获取
+  - 接口：`NemesisInstance().getHIM_DiskFileGenPtr()->genFilesByPath()`
+  - 用途：获取文件签名者信息，验证特定公司签名
+
+### 数据上报
+- **utils::ReportData**：数据上报接口
+  - 位置：`src/include/helper/utils.h`
+  - 用途：向服务器上报检测结果和异常信息
+
+### 工具函数
+- **路径处理**：`std::filesystem::path` 用于跨平台路径操作
+
+## 字符串
+### 如果函数参数为SCHAR_T*相关，字符串字面量需使用SSTR("xxx")
+## 睡眠SLEEP_MS
+例子：
+```
+// 睡眠10ms
+SLEEP_MS(10)
+```
